@@ -67,6 +67,7 @@ class Publicador:
                 return
             await self._aplicar(comando)
             self.versoes.registrar(chave, comando.ciclo_iniciado_em)
+        log.info("%s aplicado: %s", comando.routing_key, chave)
         TEMPO_SINCRONIZACAO.labels(comando.tipo).observe(
             (agora() - comando.ciclo_iniciado_em).total_seconds()
         )
