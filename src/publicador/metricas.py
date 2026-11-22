@@ -13,3 +13,8 @@ TEMPO_SINCRONIZACAO = Histogram(
     ["tipo"],
     buckets=(0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600),
 )
+OBSOLETAS = Counter(
+    "mensagens_obsoletas_total",
+    "Comandos descartados porque uma versão mais nova da entidade já foi aplicada",
+    ["tipo"],
+)

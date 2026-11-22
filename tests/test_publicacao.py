@@ -62,6 +62,9 @@ class MoodleFalso:
     async def inscrever(self, role_id, course_id, user_id):
         self.enrolments.add((course_id, user_id, role_id))
 
+    async def desinscrever(self, course_id, user_id):
+        self.enrolments = {e for e in self.enrolments if e[:2] != (course_id, user_id)}
+
 
 USUARIO = {
     "idnumber": "ieducar-aluno-20",
@@ -139,3 +142,53 @@ async def test_moodle_fora_do_ar_propaga_o_erro_para_o_retry_da_fila(pub):
     moodle.usuario_por = fora
     with pytest.raises(httpx.ConnectError):
         await p.tratar(msg("moodle.usuario.sincronizar", USUARIO))
+
+
+def no_ciclo(tipo: str, dados: dict, hora: int) -> Mensagem:
+    return Mensagem(
+        tipo=tipo,
+        correlation_id=f"ciclo-{hora}",
+        ciclo_iniciado_em=datetime(2026, 11, 22, hora, tzinfo=UTC),
+        dados=dados,
+    )
+
+
+@pytest.mark.anyio
+async def test_comando_antigo_reprocessado_da_dlq_nao_desfaz_o_novo(pub):
+    """O ciclo das 10h (aluno ativo) ficou na DLQ; o das 11h (aluno suspenso) passou.
+    Reprocessar o das 10h não pode reativar o aluno."""
+    p, moodle = pub
+    await p.tratar(no_ciclo("moodle.usuario.sincronizar", USUARIO, 9))
+    await p.tratar(no_ciclo("moodle.usuario.sincronizar", {**USUARIO, "suspenso": True}, 11))
+    await p.tratar(no_ciclo("moodle.usuario.sincronizar", USUARIO, 10))
+    assert next(iter(moodle.users.values()))["suspended"] is True
+
+
+@pytest.mark.anyio
+async def test_inscricao_antiga_nao_volta_depois_de_removida(pub):
+    p, moodle = pub
+    await p.tratar(no_ciclo("moodle.usuario.sincronizar", USUARIO, 9))
+    await p.tratar(
+        no_ciclo(
+            "moodle.curso.sincronizar",
+            {
+                "idnumber": "ieducar-turma-10-componente-1",
+                "shortname": "2026-T10-C1",
+                "fullname": "1º ano A – Português (2026)",
+                "ano": 2026,
+                "visivel": True,
+            },
+            9,
+        )
+    )
+    inscricao = {
+        "usuario": "ieducar-aluno-20",
+        "curso": "ieducar-turma-10-componente-1",
+        "papel": "student",
+    }
+    await p.tratar(no_ciclo("moodle.inscricao.remover", inscricao, 11))
+    await p.tratar(no_ciclo("moodle.inscricao.adicionar", inscricao, 10))
+    assert moodle.enrolments == set()
+    # Um comando de um ciclo posterior continua valendo.
+    await p.tratar(no_ciclo("moodle.inscricao.adicionar", inscricao, 12))
+    assert len(moodle.enrolments) == 1

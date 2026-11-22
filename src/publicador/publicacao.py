@@ -12,19 +12,23 @@ Isso resolve dois cenários de uma vez:
   criar), e não só a chamada de criação.
 
 O publicador também guarda o mapeamento idnumber → id do Moodle, usado nas
-inscrições (que precisam dos ids numéricos de usuário e curso).
+inscrições (que precisam dos ids numéricos de usuário e curso), e a versão da última
+mensagem aplicada a cada entidade: uma mensagem mais antiga (ex.: reprocessada da DLQ
+depois que uma mais nova passou) é descartada (versoes.py).
 """
 
 import asyncio
 import logging
 import sqlite3
+from collections import defaultdict
 
 import httpx
 
 from publicador.mensagem import Mensagem, agora
-from publicador.metricas import TEMPO_SINCRONIZACAO
+from publicador.metricas import OBSOLETAS, TEMPO_SINCRONIZACAO
 from publicador.moodle import MoodleClient
 from publicador.retry import com_retry
+from publicador.versoes import Versoes
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +43,9 @@ class Publicador:
         self.moodle = moodle
         self.setup = setup  # token, category_id (categoria "iEducar") e role_ids
         self._lock_categoria = asyncio.Lock()
+        self.versoes = Versoes(db)
+        # Comandos da mesma entidade, um por vez (os de entidades diferentes em paralelo).
+        self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         # Para demonstrar o cenário 3: a próxima criação acontece no Moodle, mas a
         # resposta é descartada, como se não tivesse chegado (POST /simular/...).
         self.perder_proxima_resposta = False
@@ -48,6 +55,23 @@ class Publicador:
 
     @com_retry  # timeout ou erro 5xx: repete a operação inteira, com backoff
     async def tratar(self, comando: Mensagem) -> None:
+        chave = _chave(comando)
+        async with self._locks[chave]:
+            if self.versoes.obsoleta(chave, comando.ciclo_iniciado_em):
+                log.warning(
+                    "%s de %s descartado: já foi aplicada uma versão mais nova",
+                    comando.routing_key,
+                    chave,
+                )
+                OBSOLETAS.labels(comando.routing_key).inc()
+                return
+            await self._aplicar(comando)
+            self.versoes.registrar(chave, comando.ciclo_iniciado_em)
+        TEMPO_SINCRONIZACAO.labels(comando.tipo).observe(
+            (agora() - comando.ciclo_iniciado_em).total_seconds()
+        )
+
+    async def _aplicar(self, comando: Mensagem) -> None:
         d = comando.dados
         match comando.tipo:
             case "moodle.usuario.sincronizar":
@@ -64,9 +88,6 @@ class Publicador:
                 user_id, course_id = await self._ids(d["usuario"], d["curso"])
                 if user_id and course_id:
                     await self.moodle.desinscrever(course_id, user_id)
-        TEMPO_SINCRONIZACAO.labels(comando.tipo).observe(
-            (agora() - comando.ciclo_iniciado_em).total_seconds()
-        )
 
     async def _usuario(self, d: dict) -> None:
         existente = await self.moodle.usuario_por("idnumber", d["idnumber"])
@@ -144,3 +165,12 @@ class Publicador:
             self.db.execute(
                 "INSERT OR REPLACE INTO mapeamento VALUES (?, ?)", (idnumber, int(moodle_id))
             )
+
+
+def _chave(comando: Mensagem) -> str:
+    """Entidade a que o comando se refere. Adicionar e remover a mesma inscrição têm a
+    mesma chave: a mais nova das duas é a que vale."""
+    d = comando.dados
+    if comando.tipo.startswith("moodle.inscricao."):
+        return f"inscricao:{d['usuario']}|{d['curso']}|{d['papel']}"
+    return f"{comando.tipo.split('.')[1]}:{d['idnumber']}"  # usuario:… ou curso:…

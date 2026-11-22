@@ -20,7 +20,8 @@ Faz parte da integração montada em
 
 **Publica:** nada.
 
-**Dados próprios:** `mapeamento` (idnumber → id do Moodle).
+**Dados próprios:** `mapeamento` (idnumber → id do Moodle) e `versao` (ciclo da
+última mensagem aplicada a cada usuário, curso e inscrição).
 
 ## Resiliência
 
@@ -30,6 +31,9 @@ Faz parte da integração montada em
   (procurar + criar), não só na chamada de criação.
 - Depois disso, a mensagem volta pela fila `publicador.retry` (10s); depois de 5
   falhas vai para `publicador.dlq`.
+- **Versão por entidade:** um comando de um ciclo anterior ao último aplicado à mesma
+  entidade é descartado (`mensagens_obsoletas_total`). Por isso reprocessar a DLQ não
+  desfaz uma alteração mais nova. Comandos da mesma entidade são tratados um por vez.
 
 ## API
 
