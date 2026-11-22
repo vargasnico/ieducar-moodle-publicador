@@ -1,6 +1,6 @@
 [project]
 name = "ieducar-moodle-publicador"
-version = "1.1.1"
+version = "1.2.0"
 description = "Aplica no Moodle os comandos da integração, de forma idempotente"
 readme = "README.md"
 authors = [

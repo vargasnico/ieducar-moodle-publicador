@@ -53,6 +53,31 @@ Faz parte da integração montada em
 | `MOODLE_SETUP_FILE` | `/shared/moodle.json` | Token e ids gerados pelo `moodle-setup` do ambiente |
 | `MOODLE_TIMEOUT` | `10` | Timeout de resposta (s) |
 
+## Estrutura (arquitetura hexagonal)
+
+O domínio fica no centro e não conhece banco, broker nem HTTP; o caso de uso o usa
+por meio das portas (interfaces), e os adaptadores as implementam. Trocar o SQLite
+ou o RabbitMQ é trocar um adaptador; os testes usam versões em memória das portas.
+
+```
+src/publicador/
+├── dominio/                regras puras, sem banco, rede nem framework
+│   ├── decisao.py          procurar antes de criar: atualizar, criar ou nada a fazer
+│   └── versao.py           mensagem de um ciclo mais antigo é obsoleta
+├── aplicacao/
+│   └── aplicar_comando.py  caso de uso: versão, decisão e execução no Moodle (com retry)
+├── portas.py               interfaces: Moodle, EstadoPublicador
+├── adaptadores/            implementações das portas e entradas do serviço
+│   ├── moodle.py           porta Moodle sobre os Web Services REST
+│   ├── simulacao.py        embrulha o Moodle para simular a resposta perdida (cenário 3)
+│   ├── sqlite.py           porta EstadoPublicador (mapeamento de ids, versões)
+│   ├── rabbitmq.py         entrada (consumo, retry, DLQ)
+│   └── api.py              entrada HTTP (/dlq/reprocessar, /simular/..., /health, /metrics)
+├── infra/                  logs JSON, métricas, retry
+├── mensagem.py             formato das mensagens (o contrato com os outros serviços)
+└── main.py                 composição: cria os adaptadores e os injeta no caso de uso
+```
+
 ## Desenvolvimento
 
 ```bash

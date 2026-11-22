@@ -1,4 +1,4 @@
-"""Cliente dos Web Services REST do Moodle (o timeout fica no httpx.AsyncClient)."""
+"""Adaptador da porta Moodle sobre os Web Services REST (o timeout fica no httpx.AsyncClient)."""
 
 import json
 from pathlib import Path
