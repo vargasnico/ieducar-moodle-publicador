@@ -29,8 +29,8 @@ Faz parte da integração montada em
   nada, e uma criação cuja resposta se perdeu é encontrada na tentativa seguinte.
 - Timeout de 3s/10s e 3 tentativas com backoff (tenacity) na operação inteira
   (procurar + criar), não só na chamada de criação.
-- Depois disso, a mensagem volta pela fila `publicador.retry` (10s); depois de 5
-  falhas vai para `publicador.dlq`.
+- Depois disso, a mensagem volta pela fila `publicador.retry` (`RETRY_ATRASO`, padrão
+  10s); depois de `RETRY_TENTATIVAS` falhas (padrão 5) vai para `publicador.dlq`.
 - **Versão por entidade:** um comando de um ciclo anterior ao último aplicado à mesma
   entidade é descartado (`mensagens_obsoletas_total`). Por isso reprocessar a DLQ não
   desfaz uma alteração mais nova. Comandos da mesma entidade são tratados um por vez.
@@ -52,6 +52,8 @@ Faz parte da integração montada em
 | `MOODLE_URL` | `http://localhost:8080` | Moodle |
 | `MOODLE_SETUP_FILE` | `/shared/moodle.json` | Token e ids gerados pelo `moodle-setup` do ambiente |
 | `MOODLE_TIMEOUT` | `10` | Timeout de resposta (s) |
+| `RETRY_ATRASO` | `10` | Segundos na fila de retry antes de tentar de novo (máximo 10) |
+| `RETRY_TENTATIVAS` | `5` | Falhas até a mensagem ir para a DLQ |
 
 ## Estrutura (arquitetura hexagonal)
 
